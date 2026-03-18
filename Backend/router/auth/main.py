@@ -2,10 +2,20 @@ from fastapi import APIRouter, HTTPException
 import json
 from models.auth import Signup, Login
 from db.database import db
+from passlib.context import CryptContext
+
 
 
 auth_router = APIRouter(prefix="/auth")
 users = db["users"]
+hashed_password_context = CryptContext(schemes=['bcrypt'], deprecated="auto")
+
+
+def get_hash_password(password: str)->str:
+    return hashed_password_context.hash(password)
+
+def verify_password(password: str, hashed_passwordd: str)->bool:
+    return hashed_password_context.verify(password, hashed_passwordd)
 
 @auth_router.get('/')
 async def get_auth_health():
@@ -14,6 +24,7 @@ async def get_auth_health():
 @auth_router.post('/signup')
 async def signup(payload: Signup):
     existing_user = users.find_one({"email":payload.email})
+    hashed_password=get_hash_password(payload.password)
 
     if existing_user:
         raise HTTPException(status_code=400, detail="User Email Already exists")
@@ -22,7 +33,7 @@ async def signup(payload: Signup):
         {
             "name": payload.name,
             "email": payload.email,
-            "password": payload.password
+            "password": hashed_password
         }
     )
 
@@ -37,6 +48,13 @@ async def login(payload: Login):
     if not existing_user:
         raise HTTPException(status_code=400, detail=f"The email: {payload.email} does not match. Sign up kro")
     
-    return {"message": "Login Succesful"}
+    original_pass = existing_user["password"]
+    payload_password = payload.password
+
+    if not verify_password(payload_password, original_pass):
+        raise HTTPException(status_code=400, detail="Invalid password")
+
+    return {"message": "Login Successful"}
+
 
 
