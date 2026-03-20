@@ -13,7 +13,7 @@ langchain-community
 langchain-groq
 qdrant-client
 cloudinary
-weaviate-client>=4.11.3
+weaviate-client
 requests
 pypdf
 python-docx
