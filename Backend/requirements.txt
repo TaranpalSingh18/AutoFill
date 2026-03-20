@@ -13,3 +13,9 @@ langchain-community
 langchain-groq
 qdrant-client
 cloudinary
+weaviate-client>=4.11.3
+requests
+pypdf
+python-docx
+pillow
+pytesseract
