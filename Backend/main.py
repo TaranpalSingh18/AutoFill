@@ -15,7 +15,12 @@ app.include_router(retrieval_router)
 @app.on_event("startup")
 async def start_mongo():
     print("starting mongo")
-    ping_mongo()
+    try:
+        ping_mongo()
+    except Exception as e:
+        print(f"Mongo startup failed: {type(e).__name__}: {e}")
+        print("Check MONGO_URI credentials, Atlas IP allowlist, and local network/VPN/firewall.")
+        raise
 
 @app.on_event("shutdown")
 async def shut_mongo():
