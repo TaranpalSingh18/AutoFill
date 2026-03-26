@@ -1,6 +1,6 @@
 
-const labels = ["Home", "About", "Features", "Contact Us"]
-const args = ["Signup", "Login"]
+
+import { Link } from "react-router-dom"
 
 
 const Navbar = () => {
@@ -10,20 +10,15 @@ const Navbar = () => {
             
         <h1 className="font-bold">Logo</h1>
 
-            <ul className="flex gap-10 mx-auto">
-                {labels.map((item, index) =>(
-                    <li key={index} className="cursor-pointer">
-                        {item}
-                    </li>
-                ))}
+            <ul className="flex gap-10 mx-auto cursor-pointer">
+                <li><Link to="/">Home</Link></li>
+                <li><Link to="/feature">Features</Link></li>
+                <li><Link to="/about">About</Link></li>
             </ul>
 
-            <ul className="flex gap-10">
-                {args.map((item, index)=>(
-                    <li key={index} className="cursor-pointer">
-                        {item}
-                    </li>
-                ))}
+            <ul className="flex gap-10 cursor-pointer mr-10">
+                <li><Link to="/signup">Signup</Link></li>
+                <li><Link to="/login">Login</Link></li>
             </ul>
 
             

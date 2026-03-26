@@ -1,6 +1,7 @@
 import React from "react";
 import Navbar from "./components/Navbar";
 import Card from "./components/Cards";
+import Input from "./components/Input";
 
 const labels = [
   {
@@ -28,13 +29,15 @@ const App = () => {
     <div>
       <Navbar />
 
-      <div className="flex gap-6 flex-wrap justify-center mt-10">
+      {/* <div className="flex gap-6 flex-wrap justify-center mt-10">
         {labels.map((obj, index) => (
           <div key={index}>
           <Card image_url={obj.image_url} name={obj.name} age={obj.age} race={obj.race}/>
           </div>
         ))}
       </div>
+
+      <Input input="text" label="Full Name"/> */}
     </div>
   );
 };
