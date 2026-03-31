@@ -18,10 +18,10 @@ from models.vectorised_file import SearchFileResponse
 load_dotenv()
 
 upload = db["files"]
-retrieval_router = APIRouter(tags=["retrieval"], prefix="/retrieval")
+retrieval_router = APIRouter(tags=["retrieval"])
 
 _client = None
-_embedding_model = None
+_embeddings = None
 COLLECTION_NAME = "DocumentChunk"
 
 
@@ -61,6 +61,14 @@ class IngestTextBody(BaseModel):
     file_id: str
     file_name: str
     text: str
+    chunk_size: int = 900
+    overlap: int = 120
+
+
+class SearchBody(BaseModel):
+    query: str
+    file_id: Optional[str] = None
+    limit: int = 5
 
 
 def ensure_collection(client):
@@ -79,53 +87,114 @@ def ensure_collection(client):
     )
 
 
-def get_embedding_model():
-    global _embedding_model
-    if _embedding_model is not None:
-        return _embedding_model
+def get_embeddings_model():
+    global _embeddings
+    if _embeddings is not None:
+        return _embeddings
 
     try:
-        from sentence_transformers import SentenceTransformer
+        from langchain_community.embeddings import HuggingFaceEmbeddings
     except ImportError as e:
         raise RuntimeError(
-            "sentence-transformers is not installed. Install it with: pip install sentence-transformers"
+            "langchain-community is missing. Install it with: pip install langchain-community"
         ) from e
 
-    _embedding_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-    return _embedding_model
+    _embeddings = HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2",
+        encode_kwargs={"normalize_embeddings": True},
+    )
+    return _embeddings
 
 
-def embed_text(text: str) -> list[float]:
-    model = get_embedding_model()
-    vector = model.encode(text, normalize_embeddings=True)
-    return vector.tolist()
+def embed_query(text: str) -> list[float]:
+    model = get_embeddings_model()
+    return model.embed_query(text)
+
+
+def embed_documents(texts: list[str]) -> list[list[float]]:
+    model = get_embeddings_model()
+    return model.embed_documents(texts)
 
 
 def chunk_text(text: str, chunk_size: int = 900, overlap: int = 120):
     if not text:
         return []
 
-    out = []
-    i = 0
-    n = len(text)
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be > 0")
+    if overlap < 0:
+        raise ValueError("overlap must be >= 0")
+    if overlap >= chunk_size:
+        raise ValueError("overlap must be smaller than chunk_size")
 
-    while i < n:
-        end = min(i + chunk_size, n)
-        out.append(text[i:end])
-        if end == n:
-            break
-        i = max(end - overlap, i + 1)
+    try:
+        from langchain.text_splitter import RecursiveCharacterTextSplitter
+    except ImportError as e:
+        raise RuntimeError("langchain is missing. Install it with: pip install langchain") from e
 
-    return out
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=overlap,
+        length_function=len,
+    )
+    return splitter.split_text(text)
 
 
-@retrieval_router.post("/ingest-text")
+def _search_chunks(q: str, file_id: Optional[str], limit: int) -> list[SearchFileResponse]:
+    client = get_client()
+    collection = client.collections.get(COLLECTION_NAME)
+
+    where_filter = None
+    if file_id:
+        where_filter = Filter.by_property("file_id").equal(file_id)
+
+    query_vector = embed_query(q)
+    result = collection.query.near_vector(
+        near_vector=query_vector,
+        filters=where_filter,
+        limit=limit,
+        return_metadata=["distance"],
+    )
+
+    response_items = []
+    for obj in result.objects:
+        props = obj.properties
+        score = None
+        if obj.metadata is not None:
+            distance = getattr(obj.metadata, "distance", None)
+            if distance is not None:
+                score = max(0.0, 1 - float(distance))
+
+        response_items.append(
+            SearchFileResponse(
+                file_id=props.get("file_id", ""),
+                file_name=props.get("file_name", ""),
+                chunk_id=props.get("chunk_id", 0),
+                text=props.get("text", ""),
+                score=score,
+            )
+        )
+
+    return response_items
+
+
+@retrieval_router.post("/internal/embeddings/store")
+@retrieval_router.post("/retrieval/ingest-text")
 def ingest_text(body: IngestTextBody):
     try:
         client = get_client()
         collection = client.collections.get(COLLECTION_NAME)
 
-        chunks = chunk_text(body.text)
+        upload.update_one(
+            {"file_id": body.file_id},
+            {"$set": {"ingest_status": "processing", "ingest_error": None}},
+        )
+
+        chunks = chunk_text(
+            body.text,
+            chunk_size=body.chunk_size,
+            overlap=body.overlap,
+        )
         if not chunks:
             raise HTTPException(status_code=400, detail="No text to ingest")
 
@@ -133,12 +202,13 @@ def ingest_text(body: IngestTextBody):
             where=Filter.by_property("file_id").equal(body.file_id)
         )
 
+        chunk_vectors = embed_documents(chunks)
+
         for idx, chunk in enumerate(chunks):
             doc_uuid = str(uuid5(NAMESPACE_DNS, f"{body.file_id}:{idx}"))
-            chunk_vector = embed_text(chunk)
             collection.data.insert(
                 uuid=doc_uuid,
-                vector=chunk_vector,
+                vector=chunk_vectors[idx],
                 properties={
                     "file_id": body.file_id,
                     "file_name": body.file_name,
@@ -161,6 +231,8 @@ def ingest_text(body: IngestTextBody):
         return {"file_id": body.file_id, "chunk_count": len(chunks)}
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         upload.update_one(
             {"file_id": body.file_id},
@@ -169,47 +241,27 @@ def ingest_text(body: IngestTextBody):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@retrieval_router.get("/search", response_model=list[SearchFileResponse])
+@retrieval_router.get("/retrieval/search", response_model=list[SearchFileResponse])
 def search(
     q: str = Query(..., min_length=2),
     file_id: Optional[str] = None,
     limit: int = Query(5, ge=1, le=20),
 ):
     try:
-        client = get_client()
-        collection = client.collections.get(COLLECTION_NAME)
+        return _search_chunks(q=q, file_id=file_id, limit=limit)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-        where_filter = None
-        if file_id:
-            where_filter = Filter.by_property("file_id").equal(file_id)
 
-        query_vector = embed_text(q)
-        result = collection.query.near_vector(
-            near_vector=query_vector,
-            filters=where_filter,
-            limit=limit,
-            return_metadata=["distance"],
-        )
+@retrieval_router.post("/api/search")
+def search_pipeline(body: SearchBody):
+    if len(body.query.strip()) < 2:
+        raise HTTPException(status_code=400, detail="query must be at least 2 characters")
+    if body.limit < 1 or body.limit > 20:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 20")
 
-        response_items = []
-        for obj in result.objects:
-            props = obj.properties
-            score = None
-            if obj.metadata is not None:
-                distance = getattr(obj.metadata, "distance", None)
-                if distance is not None:
-                    score = 1 - float(distance)
-
-            response_items.append(
-                SearchFileResponse(
-                    file_id=props.get("file_id", ""),
-                    file_name=props.get("file_name", ""),
-                    chunk_id=props.get("chunk_id", 0),
-                    text=props.get("text", ""),
-                    score=score,
-                )
-            )
-
-        return response_items
+    try:
+        items = _search_chunks(q=body.query, file_id=body.file_id, limit=body.limit)
+        return {"results": [item.model_dump() for item in items]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

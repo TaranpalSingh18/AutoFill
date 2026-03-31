@@ -1,0 +1,328 @@
+# Autofill AI System - Backend API Master Document
+
+Last updated: 2026-03-27
+
+This document contains:
+- Full API inventory
+- Use case of each API
+- Current implementation status (Done / Partial / Pending)
+- What is required to complete the end-to-end project
+
+------------------------------------------------------------
+
+## 1) Product Goal (End State)
+
+Autofill should let a user:
+1. Sign up / log in
+2. Upload one or more documents (resume, thesis, marksheet, etc.)
+3. Process documents through AI pipeline
+4. Store structured profile data + searchable chunks
+5. Autofill external form fields accurately
+
+------------------------------------------------------------
+
+## 2) Current Backend Reality (From Code)
+
+### Implemented Routers
+- Auth router: prefix `/auth`
+- Upload router: prefix `/upload`
+- Retrieval router: prefix `/retrieval`
+
+### Implemented Core Integrations
+- MongoDB connection and health ping
+- Cloudinary upload
+- Weaviate vector storage and semantic search
+- JWT auth token generation
+
+### Existing Endpoints (Actually Present)
+
+#### 2.1 Service Health
+- `GET /health`
+- Use case: verify API server is alive.
+- Status: Done
+
+#### 2.2 Auth Health
+- `GET /auth/`
+- Use case: quick router-level health check.
+- Status: Done
+
+#### 2.3 Signup
+- `POST /auth/signup`
+- Use case: create a new user account with hashed password.
+- Request body:
+  - `name`
+  - `email`
+  - `password`
+- Status: Done
+
+#### 2.4 Login
+- `POST /auth/login`
+- Use case: authenticate user and return JWT bearer token.
+- Request body:
+  - `email`
+  - `password`
+- Response includes:
+  - `access_token`
+  - `token_type`
+- Status: Done
+
+#### 2.5 Upload File
+- `POST /upload`
+- Use case: upload file to Cloudinary and store metadata in MongoDB (`files` collection).
+- Request: multipart form-data with `file`
+- Response fields:
+  - `file_id`
+  - `name`
+  - `file_length`
+- Status: Done
+
+#### 2.6 Ingest Text to Vector DB
+- `POST /retrieval/ingest-text`
+- Use case: chunk text, embed chunks, and store vectors in Weaviate.
+- Request body:
+  - `file_id`
+  - `file_name`
+  - `text`
+- Notes:
+  - Updates ingest status in MongoDB
+  - Deletes previous vectors for same file before reinserting
+- Status: Done
+
+#### 2.7 Semantic Search
+- `GET /retrieval/search?q=...&file_id=...&limit=...`
+- Use case: retrieve semantically relevant chunks for a query.
+- Response: list of chunks with optional similarity score.
+- Status: Done
+
+------------------------------------------------------------
+
+## 3) API Target Architecture (What We Need)
+
+Below is the complete target API surface for MVP + near-term scale.
+
+Legend:
+- Done: implemented and usable
+- Partial: exists but missing required behavior
+- Pending: not implemented
+
+### 3.1 Auth APIs
+
+1. `POST /auth/signup`
+- Use case: create user account.
+- Status: Done
+
+2. `POST /auth/login`
+- Use case: login + obtain JWT token.
+- Status: Done
+
+3. `GET /auth/me`
+- Use case: fetch current logged-in user profile from JWT.
+- Status: Pending
+
+4. `POST /auth/refresh`
+- Use case: refresh access token.
+- Status: Pending
+
+### 3.2 Document APIs
+
+1. `POST /upload`
+- Use case: upload file + store metadata.
+- Status: Done
+
+2. `GET /upload`
+- Use case: list all user documents.
+- Status: Pending
+
+3. `GET /upload/{file_id}`
+- Use case: fetch one document metadata.
+- Status: Pending
+
+4. `DELETE /upload/{file_id}`
+- Use case: delete document from Mongo + Cloudinary + Weaviate.
+- Status: Pending
+
+### 3.3 Processing Orchestration APIs
+
+1. `POST /process/{file_id}`
+- Use case: start processing pipeline for uploaded file.
+- Status: Pending
+
+2. `GET /process/{file_id}/status`
+- Use case: check whether processing is queued/running/completed/failed.
+- Status: Pending
+
+3. `POST /process/{file_id}/reprocess`
+- Use case: rerun processing for improved extraction/classification.
+- Status: Pending
+
+### 3.4 Internal Pipeline APIs
+
+1. `POST /internal/extract-text`
+- Use case: extract raw text from file URL or file ID.
+- Status: Pending
+
+2. `POST /internal/chunk`
+- Use case: chunk long text into embeddings-friendly segments.
+- Status: Partial (logic exists inside retrieval code, not exposed as service)
+
+3. `POST /internal/classify`
+- Use case: classify chunks into sections (personal_info, work_experience, projects, thesis, etc.).
+- Status: Pending
+
+4. `POST /internal/structure`
+- Use case: convert classified chunks into strict JSON schema.
+- Status: Pending
+
+5. `POST /internal/aggregate`
+- Use case: merge structured output from multiple documents.
+- Status: Pending
+
+6. `POST /retrieval/ingest-text`
+- Use case: vectorize and store chunk embeddings.
+- Status: Done
+
+### 3.5 User Data APIs
+
+1. `GET /user/data`
+- Use case: fetch final structured profile used for autofill.
+- Status: Pending
+
+2. `PUT /user/data`
+- Use case: user edits structured profile manually.
+- Status: Pending
+
+3. `GET /user/data/review`
+- Use case: return low-confidence items needing user confirmation.
+- Status: Pending
+
+### 3.6 Search and Autofill APIs
+
+1. `GET /retrieval/search`
+- Use case: semantic retrieval for query-to-answer grounding.
+- Status: Done
+
+2. `POST /autofill`
+- Use case: map requested form field names to best answers.
+- Status: Pending
+
+3. `POST /autofill/smart`
+- Use case: parse raw form text and generate field-value pairs automatically.
+- Status: Pending
+
+------------------------------------------------------------
+
+## 4) What Is Done vs What Needs To Be Done
+
+## Done
+- Auth signup/login with hashed passwords and JWT access token
+- File upload to Cloudinary and metadata persistence in MongoDB
+- Text chunking + embedding + Weaviate ingestion
+- Semantic retrieval endpoint
+- Basic service health endpoints
+
+## Partial / Technical Debt
+- Chunking is embedded in retrieval router; should be moved to shared pipeline service.
+- No user ownership checks on many resources yet.
+- No background queue for processing jobs.
+- No centralized error schema across endpoints.
+- No endpoint-level auth protection on upload/retrieval routes (must enforce).
+
+## Pending (Critical for Full Project)
+- Extract text service
+- Classification service
+- Structured data generation and storage
+- User data read/update APIs
+- Autofill APIs (core product feature)
+- Document list/delete/reprocess flows
+
+------------------------------------------------------------
+
+## 5) Recommended Execution Plan To Complete Project
+
+Build in this sequence:
+
+### Phase 1: Secure and stabilize existing APIs
+1. Add auth dependency (`get_current_user`) to upload/retrieval routes.
+2. Add user_id ownership in `files` and vector metadata.
+3. Add `GET /upload` and `DELETE /upload/{file_id}`.
+4. Add consistent response model and error format.
+
+### Phase 2: Build extraction + processing orchestration
+1. Implement `POST /internal/extract-text`.
+2. Implement `POST /process/{file_id}` to orchestrate pipeline.
+3. Add processing status tracking in Mongo (`queued`, `processing`, `done`, `failed`).
+4. Add `GET /process/{file_id}/status`.
+
+### Phase 3: Structured intelligence layer
+1. Implement `POST /internal/classify`.
+2. Implement `POST /internal/structure`.
+3. Persist structured profile in `user_profile` collection.
+4. Add `GET /user/data` and `PUT /user/data`.
+
+### Phase 4: Core autofill capability
+1. Implement `POST /autofill` (field list -> mapped answers).
+2. Implement `POST /autofill/smart` (raw form text -> inferred fields + values).
+3. Add confidence scoring and explainability source references.
+
+### Phase 5: Quality and production readiness
+1. Add tests (unit + integration).
+2. Add rate limiting and validation hardening.
+3. Add monitoring/logging and retry policy for pipeline failures.
+4. Add API docs examples and frontend contract docs.
+
+------------------------------------------------------------
+
+## 6) Suggested MongoDB Collections
+
+1. `users`
+- account data, hashed password
+
+2. `files`
+- uploaded file metadata, owner, status, cloudinary refs
+
+3. `processing_jobs`
+- pipeline run history, state transitions, error reasons
+
+4. `user_profile`
+- final structured data for autofill
+
+5. `autofill_logs`
+- form fields requested, answers returned, confidence, timestamp
+
+------------------------------------------------------------
+
+## 7) Minimal MVP Definition (Ship Fast)
+
+MVP required endpoints:
+1. `POST /auth/signup`
+2. `POST /auth/login`
+3. `POST /upload`
+4. `POST /internal/extract-text`
+5. `POST /retrieval/ingest-text`
+6. `GET /retrieval/search`
+7. `GET /user/data`
+8. `POST /autofill`
+
+MVP success criteria:
+- One uploaded PDF can be processed into searchable + structured data.
+- Given a list of form fields, API returns useful autofill values.
+- All operations are user-scoped and authenticated.
+
+------------------------------------------------------------
+
+## 8) Immediate Next Step (Concrete)
+
+Implement next endpoint:
+- `POST /internal/extract-text`
+
+Then wire processing flow:
+1. Upload file -> get cloudinary URL
+2. Extract text from URL
+3. Ingest text to vectors
+4. Classify + structure
+5. Save `/user/data`
+6. Serve `/autofill`
+
+------------------------------------------------------------
+
+End of document.

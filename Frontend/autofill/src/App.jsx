@@ -1,7 +1,5 @@
 import React from "react";
 import Navbar from "./components/Navbar";
-import Card from "./components/Cards";
-import Input from "./components/Input";
 import { Route, Routes, useLocation} from "react-router-dom";
 import Signup from "./components/Signup";
 import Home from "./components/Home";
@@ -34,8 +32,9 @@ const App = () => {
     <div>
       {!hideNavbar && <Navbar/>}
         <Routes>
-          <Route path="/signup" element={<Signup/>} />
+          <Route path="/" element={<Home/>}/>
           <Route path="/home" element={<Home/>}/>
+          <Route path="/signup" element={<Signup/>} />
         </Routes>
     </div>
   );
