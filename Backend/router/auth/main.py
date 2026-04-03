@@ -78,15 +78,30 @@ async def signup(payload: Signup):
     if existing_user:
         raise HTTPException(status_code=400, detail="User Email Already exists")
     
-    users.insert_one(
+    result = users.insert_one(
         {
             "name": payload.name,
             "email": payload.email,
-            "password": hashed_password
+            "password": hashed_password,
+            "created_at": datetime.now(timezone.utc),
+            "is_active": True
         }
     )
 
-    return {"messsage": f"User Created with email: {payload.email}"}
+    token_expiry = timedelta(minutes=int(access_token_time))
+    access_token = create_access_tokens(
+        data={"sub": payload.email},
+        expires_delta=token_expiry,
+    )
+
+    return {
+        "message": "User Created Successfully",
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user_id": str(result.inserted_id),
+        "name": payload.name,
+        "email": payload.email
+    }
 
 
 @auth_router.post('/login')
@@ -120,7 +135,10 @@ async def login(payload: Login):
     return {
         "message": "Login Successful",
         "access_token": access_token,
-        "token_type": "bearer", 
+        "token_type": "bearer",
+        "user_id": str(existing_user["_id"]),
+        "name": existing_user.get("name", ""),
+        "email": existing_user["email"]
     }
 
 

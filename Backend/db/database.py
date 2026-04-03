@@ -14,14 +14,13 @@ if not mongo_uri:
 client = MongoClient(mongo_uri, server_api=ServerApi("1"))
 db = client[cluster_name]
 
-## acha matlab cluster name ek client ke naam ke array mei stored hai
-
 def ping_mongo():
     client.admin.command("ping")
-    print("MongoDB Connected Successfully")
+    print("✅ MongoDB Connected Successfully")
     return True
 
 def close_mongo():
     print("Terminating Connection")
     client.close()
+
 

@@ -1,94 +1,174 @@
-from fastapi import APIRouter, UploadFile, File as FastAPIFile, HTTPException
+from fastapi import APIRouter, UploadFile, File as FastAPIFile, HTTPException, Depends, status
+from fastapi.security import OAuth2PasswordBearer
 import os
 from datetime import datetime, timezone
 from uuid import uuid4
-
-import cloudinary
-import cloudinary.uploader
-from cloudinary.exceptions import Error as CloudinaryError
+from jose import jwt
+import json
 
 from db.database import db
-from models.file import File as FileModel
+from models.file import File as FileModel, FileResponse
+from router.auth.main import get_current_user
 
-upload_router = APIRouter(tags=["upload-file"], prefix="/upload")
-uploads = db["files"]
+upload_router = APIRouter(tags=["files"], prefix="/files")
+files_collection = db["files"]
 
-_cloudinary_configured = False
+oath2_schema = OAuth2PasswordBearer(tokenUrl="/auth/login")
+secret_key = os.getenv("JWT_SECRET_KEY")
+algorithm = os.getenv("JWT_ALGO")
 
-
-def configure_cloudinary() -> None:
-    global _cloudinary_configured
-    if _cloudinary_configured:
-        return
-
-    cloudinary_url = os.getenv("CLOUDINARY_URL")
-    if cloudinary_url:
-        cloudinary.config(cloudinary_url=cloudinary_url, secure=True)
-        _cloudinary_configured = True
-        return
-
-    cloud_name = os.getenv("CLOUDINARY_CLOUD_NAME")
-    api_key = os.getenv("CLOUDINARY_API_KEY")
-    api_secret = os.getenv("CLOUDINARY_API_SECRET")
-
-    if not all([cloud_name, api_key, api_secret]):
-        raise RuntimeError(
-            "Cloudinary is not configured. Set CLOUDINARY_URL or CLOUDINARY_CLOUD_NAME/API_KEY/API_SECRET."
-        )
-
-    cloudinary.config(
-        cloud_name=cloud_name,
-        api_key=api_key,
-        api_secret=api_secret,
-        secure=True,
-    )
-    _cloudinary_configured = True
-
-
-@upload_router.post("", response_model=FileModel)
-async def upload_file(file: UploadFile = FastAPIFile(...)):
-    if not file:
-        raise HTTPException(status_code=404, detail="file not found")
-
-    payload = await file.read()
-    if not payload:
-        raise HTTPException(status_code=400, detail="empty file")
-
-    file_id = str(uuid4())
-    file_name = (file.filename or f"file_{file_id}").strip()
-
+def get_user_from_token(token: str = Depends(oath2_schema)):
+    """Extract user from JWT token"""
     try:
-        configure_cloudinary()
-        upload_result = cloudinary.uploader.upload(
-            payload,
-            resource_type="auto",
-            folder="autofill_uploads",
-            public_id=file_id,
-            overwrite=False,
-            filename_override=file_name,
-        )
-    except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    except CloudinaryError as e:
-        raise HTTPException(status_code=502, detail=f"Cloudinary upload failed: {str(e)}")
+        payload = jwt.decode(token, secret_key, algorithms=[algorithm])
+        email = payload.get("sub")
+        return email
+    except:
+        raise HTTPException(status_code=401, detail="Invalid token")
 
-    file_data = FileModel(
-        file_id=file_id,
-        name=file_name,
-        file_length=len(payload),
-    )
 
-    uploads.insert_one(
-        {
-            **file_data.model_dump(),
-            "content_type": file.content_type,
-            "upload_time": datetime.now(timezone.utc),
-            "cloudinary_public_id": upload_result.get("public_id"),
-            "cloudinary_url": upload_result.get("secure_url"),
-            "cloudinary_bytes": upload_result.get("bytes"),
-            "cloudinary_format": upload_result.get("format"),
-            "cloudinary_resource_type": upload_result.get("resource_type"),
+@upload_router.post("/upload")
+async def upload_file(file: UploadFile = FastAPIFile(...), token: str = Depends(oath2_schema)):
+    """Upload a file and store metadata in MongoDB"""
+    try:
+        # Get user from token
+        user_email = get_user_from_token(token)
+        user_data = db["users"].find_one({"email": user_email})
+        
+        if not user_data:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Read file content
+        file_content = await file.read()
+        file_size = len(file_content)
+        
+        # Create file metadata
+        file_doc = {
+            "user_id": str(user_data["_id"]),
+            "filename": file.filename,
+            "file_type": file.filename.split(".")[-1].upper() if "." in file.filename else "FILE",
+            "file_size": file_size,
+            "upload_date": datetime.now(timezone.utc),
+            "file_path": f"/uploads/{user_data['_id']}/{uuid4()}_{file.filename}",
+            "status": "uploaded",
+            "extracted_text": None,
+            "extracted_fields": {},
+            "metadata": {"content_type": file.content_type}
         }
-    )
+        
+        # Save to MongoDB
+        result = files_collection.insert_one(file_doc)
+        
+        return {
+            "success": True,
+            "file_id": str(result.inserted_id),
+            "filename": file.filename,
+            "file_type": file_doc["file_type"],
+            "file_size": file_size,
+            "upload_date": file_doc["upload_date"].isoformat()
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Upload failed: {str(e)}")
 
-    return file_data
+
+@upload_router.get("/list")
+async def list_files(token: str = Depends(oath2_schema)):
+    """Get all files uploaded by current user"""
+    try:
+        user_email = get_user_from_token(token)
+        user_data = db["users"].find_one({"email": user_email})
+        
+        if not user_data:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Get user's files
+        files = files_collection.find({"user_id": str(user_data["_id"])})
+        
+        return {
+            "success": True,
+            "files": [
+                {
+                    "id": str(f["_id"]),
+                    "filename": f["filename"],
+                    "file_type": f["file_type"],
+                    "file_size": f["file_size"],
+                    "upload_date": f["upload_date"].isoformat(),
+                    "status": f["status"]
+                }
+                for f in files
+            ]
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to list files: {str(e)}")
+
+
+@upload_router.delete("/{file_id}")
+async def delete_file(file_id: str, token: str = Depends(oath2_schema)):
+    """Delete a file by ID (only owner can delete)"""
+    try:
+        from bson import ObjectId
+        
+        user_email = get_user_from_token(token)
+        user_data = db["users"].find_one({"email": user_email})
+        
+        if not user_data:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Check if file belongs to user
+        file_doc = files_collection.find_one({"_id": ObjectId(file_id)})
+        
+        if not file_doc:
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        if file_doc["user_id"] != str(user_data["_id"]):
+            raise HTTPException(status_code=403, detail="Not authorized to delete this file")
+        
+        # Delete file
+        files_collection.delete_one({"_id": ObjectId(file_id)})
+        
+        return {
+            "success": True,
+            "message": f"File {file_doc['filename']} deleted successfully"
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Delete failed: {str(e)}")
+
+
+@upload_router.get("/{file_id}")
+async def get_file_details(file_id: str, token: str = Depends(oath2_schema)):
+    """Get details of a specific file"""
+    try:
+        from bson import ObjectId
+        
+        user_email = get_user_from_token(token)
+        user_data = db["users"].find_one({"email": user_email})
+        
+        if not user_data:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        file_doc = files_collection.find_one({"_id": ObjectId(file_id)})
+        
+        if not file_doc:
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        if file_doc["user_id"] != str(user_data["_id"]):
+            raise HTTPException(status_code=403, detail="Not authorized to access this file")
+        
+        return {
+            "success": True,
+            "file": {
+                "id": str(file_doc["_id"]),
+                "filename": file_doc["filename"],
+                "file_type": file_doc["file_type"],
+                "file_size": file_doc["file_size"],
+                "upload_date": file_doc["upload_date"].isoformat(),
+                "status": file_doc["status"],
+                "extracted_fields": file_doc.get("extracted_fields", {})
+            }
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to get file: {str(e)}")
