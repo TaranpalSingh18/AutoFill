@@ -6,6 +6,7 @@ from fastapi import APIRouter
 from db.database import db
 from typing import Optional
 from uuid import uuid5, NAMESPACE_DNS
+from bson import ObjectId
 
 from fastapi import HTTPException, Query
 from pydantic import BaseModel
@@ -83,8 +84,27 @@ def ensure_collection(client):
             Property(name="file_name", data_type=DataType.TEXT),
             Property(name="chunk_id", data_type=DataType.INT),
             Property(name="text", data_type=DataType.TEXT),
+            Property(name="category", data_type=DataType.TEXT),
+            Property(name="sub_category", data_type=DataType.TEXT),
+            Property(name="section_heading", data_type=DataType.TEXT),
         ],
     )
+
+
+def _update_ingest_status(file_id: str, status: str, ingest_error: Optional[str] = None, chunk_count: Optional[int] = None):
+    """Best-effort status update in Mongo for both legacy and current file identifiers."""
+    update_fields = {
+        "ingest_status": status,
+        "ingest_error": ingest_error,
+    }
+    if chunk_count is not None:
+        update_fields["chunk_count"] = chunk_count
+
+    filters = [{"file_id": file_id}]
+    if ObjectId.is_valid(file_id):
+        filters.append({"_id": ObjectId(file_id)})
+
+    upload.update_one({"$or": filters}, {"$set": update_fields})
 
 
 def get_embeddings_model():
@@ -140,6 +160,50 @@ def chunk_text(text: str, chunk_size: int = 900, overlap: int = 120):
     return splitter.split_text(text)
 
 
+def ingest_semantic_chunks(file_id: str, file_name: str, chunks: list[dict]) -> dict:
+    """Store semantic chunks in Weaviate with embeddings and metadata."""
+    if not chunks:
+        raise HTTPException(status_code=400, detail="No semantic chunks to ingest")
+
+    texts = [str(item.get("text", "")).strip() for item in chunks]
+    texts = [t for t in texts if t]
+    if not texts:
+        raise HTTPException(status_code=400, detail="Semantic chunks are empty")
+
+    client = get_client()
+    collection = client.collections.get(COLLECTION_NAME)
+
+    collection.data.delete_many(where=Filter.by_property("file_id").equal(file_id))
+
+    vectors = embed_documents(texts)
+
+    text_index = 0
+    for idx, chunk in enumerate(chunks):
+        chunk_text_value = str(chunk.get("text", "")).strip()
+        if not chunk_text_value:
+            continue
+
+        metadata = chunk.get("metadata") or {}
+        doc_uuid = str(uuid5(NAMESPACE_DNS, f"{file_id}:{idx}"))
+        collection.data.insert(
+            uuid=doc_uuid,
+            vector=vectors[text_index],
+            properties={
+                "file_id": file_id,
+                "file_name": file_name,
+                "chunk_id": int(chunk.get("chunk_id", idx)),
+                "text": chunk_text_value,
+                "category": str(metadata.get("category", "other")),
+                "sub_category": str(metadata.get("sub_category", "general")),
+                "section_heading": str(metadata.get("section_heading") or ""),
+            },
+        )
+        text_index += 1
+
+    _update_ingest_status(file_id=file_id, status="done", ingest_error=None, chunk_count=text_index)
+    return {"file_id": file_id, "chunk_count": text_index}
+
+
 def _search_chunks(q: str, file_id: Optional[str], limit: int) -> list[SearchFileResponse]:
     client = get_client()
     collection = client.collections.get(COLLECTION_NAME)
@@ -182,13 +246,7 @@ def _search_chunks(q: str, file_id: Optional[str], limit: int) -> list[SearchFil
 @retrieval_router.post("/retrieval/ingest-text")
 def ingest_text(body: IngestTextBody):
     try:
-        client = get_client()
-        collection = client.collections.get(COLLECTION_NAME)
-
-        upload.update_one(
-            {"file_id": body.file_id},
-            {"$set": {"ingest_status": "processing", "ingest_error": None}},
-        )
+        _update_ingest_status(file_id=body.file_id, status="processing", ingest_error=None)
 
         chunks = chunk_text(
             body.text,
@@ -198,46 +256,30 @@ def ingest_text(body: IngestTextBody):
         if not chunks:
             raise HTTPException(status_code=400, detail="No text to ingest")
 
-        collection.data.delete_many(
-            where=Filter.by_property("file_id").equal(body.file_id)
-        )
-
-        chunk_vectors = embed_documents(chunks)
-
-        for idx, chunk in enumerate(chunks):
-            doc_uuid = str(uuid5(NAMESPACE_DNS, f"{body.file_id}:{idx}"))
-            collection.data.insert(
-                uuid=doc_uuid,
-                vector=chunk_vectors[idx],
-                properties={
-                    "file_id": body.file_id,
-                    "file_name": body.file_name,
-                    "chunk_id": idx,
-                    "text": chunk,
-                },
-            )
-
-        upload.update_one(
-            {"file_id": body.file_id},
+        semantic_chunks = [
             {
-                "$set": {
-                    "ingest_status": "done",
-                    "chunk_count": len(chunks),
-                    "ingest_error": None,
-                }
-            },
-        )
+                "chunk_id": idx,
+                "text": chunk,
+                "metadata": {
+                    "category": "other",
+                    "sub_category": "general",
+                    "section_heading": "",
+                },
+            }
+            for idx, chunk in enumerate(chunks)
+        ]
 
-        return {"file_id": body.file_id, "chunk_count": len(chunks)}
+        return ingest_semantic_chunks(
+            file_id=body.file_id,
+            file_name=body.file_name,
+            chunks=semantic_chunks,
+        )
     except HTTPException:
         raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        upload.update_one(
-            {"file_id": body.file_id},
-            {"$set": {"ingest_status": "failed", "ingest_error": str(e)}},
-        )
+        _update_ingest_status(file_id=body.file_id, status="failed", ingest_error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 
