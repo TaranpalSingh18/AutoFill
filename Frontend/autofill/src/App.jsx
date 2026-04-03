@@ -4,6 +4,7 @@ import { Route, Routes, useLocation} from "react-router-dom";
 import Signup from "./components/Signup";
 import Home from "./components/Home";
 import Login from "./components/Login";
+import Dashboard from "./components/Dashboard";
 
 // const labels = [
 //   {
@@ -28,7 +29,11 @@ import Login from "./components/Login";
 
 const App = () => {
   const location = useLocation()
-  const hideNavbar = location.pathname === "/signup" || location.pathname === "/login";
+  // Hide navbar on auth pages and dashboard (extension interface)
+  const hideNavbar = location.pathname === "/signup" || 
+                     location.pathname === "/login" || 
+                     location.pathname === "/dashboard";
+  
   return (
     <div>
       {!hideNavbar && <Navbar/>}
@@ -37,6 +42,7 @@ const App = () => {
           <Route path="/home" element={<Home/>}/>
           <Route path="/signup" element={<Signup/>} />
           <Route path="/login" element={<Login/>} />
+          <Route path="/dashboard" element={<Dashboard/>} />
         </Routes>
     </div>
   );

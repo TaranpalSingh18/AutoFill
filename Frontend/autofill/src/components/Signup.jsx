@@ -1,13 +1,16 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "../hooks/useAuth";
 
 const Signup = () => {
   const navigate = useNavigate();
+  const { signup, loading, error } = useAuth();
   const [form, setForm] = useState({
     name: "",
     email: "",
     password: "",
   });
+  const [localError, setLocalError] = useState(null);
 
   const routeHome = () => {
     navigate("/home");
@@ -18,11 +21,17 @@ const Signup = () => {
       ...prev,
       [e.target.name]: e.target.value,
     }));
+    setLocalError(null);
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    console.log(form);
+    const res = await signup(form.name, form.email, form.password);
+    if (res.success) {
+      navigate("/dashboard");
+    } else {
+      setLocalError(res.error);
+    }
   };
 
   return (
@@ -73,6 +82,12 @@ const Signup = () => {
             <div className="h-px flex-1 bg-[#c0c7cd]" />
           </div>
 
+          {(error || localError) && (
+            <div className="mb-4 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error || localError}
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>
               <label className="mb-1 block text-[18px] font-semibold text-[#345063]">Full Name</label>
@@ -82,7 +97,8 @@ const Signup = () => {
                 placeholder="Enter your name"
                 value={form.name}
                 onChange={handleChange}
-                className="h-12 w-full rounded-lg border border-[#9ca8af] bg-transparent px-3 text-lg text-[#2c3f4f] outline-none focus:border-[#2f92ff] focus:shadow-[0_0_0_2px_rgba(47,146,255,0.25)]"
+                disabled={loading}
+                className="h-12 w-full rounded-lg border border-[#9ca8af] bg-transparent px-3 text-lg text-[#2c3f4f] outline-none focus:border-[#2f92ff] focus:shadow-[0_0_0_2px_rgba(47,146,255,0.25)] disabled:opacity-60"
               />
             </div>
 
@@ -94,7 +110,8 @@ const Signup = () => {
                 placeholder="you@example.com"
                 value={form.email}
                 onChange={handleChange}
-                className="h-12 w-full rounded-lg border border-[#9ca8af] bg-transparent px-3 text-lg text-[#2c3f4f] outline-none focus:border-[#2f92ff] focus:shadow-[0_0_0_2px_rgba(47,146,255,0.25)]"
+                disabled={loading}
+                className="h-12 w-full rounded-lg border border-[#9ca8af] bg-transparent px-3 text-lg text-[#2c3f4f] outline-none focus:border-[#2f92ff] focus:shadow-[0_0_0_2px_rgba(47,146,255,0.25)] disabled:opacity-60"
               />
             </div>
 
@@ -106,15 +123,17 @@ const Signup = () => {
                 placeholder="Create a strong password"
                 value={form.password}
                 onChange={handleChange}
-                className="h-12 w-full rounded-lg border border-[#9ca8af] bg-transparent px-3 text-lg text-[#2c3f4f] outline-none focus:border-[#2f92ff] focus:shadow-[0_0_0_2px_rgba(47,146,255,0.25)]"
+                disabled={loading}
+                className="h-12 w-full rounded-lg border border-[#9ca8af] bg-transparent px-3 text-lg text-[#2c3f4f] outline-none focus:border-[#2f92ff] focus:shadow-[0_0_0_2px_rgba(47,146,255,0.25)] disabled:opacity-60"
               />
             </div>
 
             <button
               type="submit"
-              className="mt-5 h-12 w-full rounded-lg bg-[#0f4d3d] px-8 text-base font-semibold text-white shadow-sm transition hover:bg-[#0c3d31]"
+              disabled={loading}
+              className="mt-5 h-12 w-full rounded-lg bg-[#0f4d3d] px-8 text-base font-semibold text-white shadow-sm transition hover:bg-[#0c3d31] disabled:opacity-70"
             >
-              Create Account
+              {loading ? "Creating Account..." : "Create Account"}
             </button>
           </form>
         </div>
