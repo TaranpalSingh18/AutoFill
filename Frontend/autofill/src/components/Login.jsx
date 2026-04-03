@@ -1,10 +1,9 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
-const Signup = () => {
+const Login = () => {
   const navigate = useNavigate();
   const [form, setForm] = useState({
-    name: "",
     email: "",
     password: "",
   });
@@ -22,7 +21,7 @@ const Signup = () => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    console.log(form);
+    console.log("Login form:", form);
   };
 
   return (
@@ -40,12 +39,12 @@ const Signup = () => {
 
           <p className="text-4xl font-semibold tracking-tight text-[#0d6149]">AutoFill.</p>
 
-          <h1 className="mt-8 text-2xl font-bold leading-[1.05] text-[#0f4d3d] md:text-5xl">Create your AutoFill account</h1>
+          <h1 className="mt-8 text-2xl font-bold leading-[1.05] text-[#0f4d3d] md:text-5xl">Welcome back to AutoFill</h1>
 
           <p className="mt-4 text-lg font-semibold leading-[1.25] text-[#102c3e]">
-            Already have an account?{" "}
-            <Link to="/login" className="text-[#1472f4] hover:underline">
-              Log In
+            New here?{" "}
+            <Link to="/signup" className="text-[#1472f4] hover:underline">
+              Create an account
             </Link>
           </p>
 
@@ -69,23 +68,11 @@ const Signup = () => {
 
           <div className="my-5 flex items-center gap-2">
             <div className="h-px flex-1 bg-[#c0c7cd]" />
-            <span className="text-base text-[#6f7f8b]">Or sign up with email</span>
+            <span className="text-base text-[#6f7f8b]">Or log in with email</span>
             <div className="h-px flex-1 bg-[#c0c7cd]" />
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-3">
-            <div>
-              <label className="mb-1 block text-[18px] font-semibold text-[#345063]">Full Name</label>
-              <input
-                type="text"
-                name="name"
-                placeholder="Enter your name"
-                value={form.name}
-                onChange={handleChange}
-                className="h-12 w-full rounded-lg border border-[#9ca8af] bg-transparent px-3 text-lg text-[#2c3f4f] outline-none focus:border-[#2f92ff] focus:shadow-[0_0_0_2px_rgba(47,146,255,0.25)]"
-              />
-            </div>
-
             <div>
               <label className="mb-1 block text-[18px] font-semibold text-[#345063]">Email Address</label>
               <input
@@ -103,7 +90,7 @@ const Signup = () => {
               <input
                 type="password"
                 name="password"
-                placeholder="Create a strong password"
+                placeholder="Enter your password"
                 value={form.password}
                 onChange={handleChange}
                 className="h-12 w-full rounded-lg border border-[#9ca8af] bg-transparent px-3 text-lg text-[#2c3f4f] outline-none focus:border-[#2f92ff] focus:shadow-[0_0_0_2px_rgba(47,146,255,0.25)]"
@@ -114,36 +101,39 @@ const Signup = () => {
               type="submit"
               className="mt-5 h-12 w-full rounded-lg bg-[#0f4d3d] px-8 text-base font-semibold text-white shadow-sm transition hover:bg-[#0c3d31]"
             >
-              Create Account
+              Log In
             </button>
           </form>
         </div>
       </section>
 
       <section className="relative hidden flex-1 overflow-hidden bg-[#056f53] p-14 text-white md:block">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_85%_25%,rgba(255,255,255,0.2),transparent_40%),radial-gradient(circle_at_65%_80%,rgba(22,135,255,0.2),transparent_35%)]" />
+
         <div className="relative z-10 max-w-[560px]">
           <h2 className="text-[60px] font-extrabold leading-[1.03]">
-            Fill Repetitive
+            Pick Up Forms
             <br />
-            Forms in
+            Right Where
             <br />
-            Seconds
+            You Left Off
           </h2>
           <p className="mt-7 max-w-[480px] text-lg leading-[1.35] text-[#e6fff6] lg:text-xl">
-            Save user details once, reuse them anywhere, and auto-complete long forms with one click.
+            Sign in and instantly continue autofilling saved profiles across repetitive workflows.
           </p>
           <button className="mt-9 border-b border-white pb-0.5 text-[34px] font-semibold">See how it works →</button>
         </div>
 
-        <div className="absolute -right-16 -top-20 h-60 w-52 rotate-12 rounded-3xl border-4 border-black bg-[#1270e7]" />
-        <div className="absolute right-16 top-8 h-72 w-36 rotate-12 rounded-2xl border-4 border-black bg-[#2bc3f1]" />
+        <div className="absolute right-10 top-10 z-0 h-56 w-44 rotate-12 rounded-3xl border-4 border-black bg-[#1270e7] shadow-[12px_12px_0_#000]" />
+        <div className="absolute right-44 top-20 z-0 h-52 w-32 -rotate-6 rounded-2xl border-4 border-black bg-[#2bc3f1] shadow-[10px_10px_0_#000]" />
 
-        <div className="absolute right-24 top-52 h-[480px] w-[480px] rotate-12 rounded-[70px] border-4 border-black bg-[#cbe988] shadow-[26px_26px_0_#000]" />
-        <div className="absolute right-40 top-72 h-[160px] w-[160px] rounded-[26px] border-4 border-black bg-[#1f74ea]" />
-        <div className="absolute right-60 top-[220px] h-9 w-9 rounded-full border-4 border-black bg-[#2ec8f4]" />
+        <div className="absolute bottom-10 right-16 z-0 h-[410px] w-[410px] rotate-6 rounded-[58px] border-4 border-black bg-[#d8f283] shadow-[24px_24px_0_#000]" />
+        <div className="absolute bottom-24 right-44 z-10 h-[170px] w-[170px] rounded-[28px] border-4 border-black bg-[#1f74ea] shadow-[10px_10px_0_#000]" />
+        <div className="absolute right-[330px] top-[260px] z-10 h-11 w-11 rounded-full border-4 border-black bg-[#2ec8f4] shadow-[6px_6px_0_#000]" />
+        <div className="absolute bottom-44 right-20 z-10 h-20 w-20 -rotate-12 rounded-xl border-4 border-black bg-[#f8fbff] shadow-[8px_8px_0_#000]" />
       </section>
     </div>
   );
 };
 
-export default Signup;
+export default Login;
