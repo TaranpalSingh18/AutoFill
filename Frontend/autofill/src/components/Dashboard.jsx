@@ -39,6 +39,10 @@ const Dashboard = () => {
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedFilter, setSelectedFilter] = useState("all");
+  const [selectedChunkFile, setSelectedChunkFile] = useState(null);
+  const [chunkViewerLoading, setChunkViewerLoading] = useState(false);
+  const [chunkViewerError, setChunkViewerError] = useState(null);
+  const [semanticChunks, setSemanticChunks] = useState([]);
 
   // Fetch files on mount
   useEffect(() => {
@@ -104,6 +108,8 @@ const Dashboard = () => {
               file_size: res.data.file_size,
               upload_date: res.data.upload_date,
               status: "uploaded",
+              ingest_status: res.data.semantic_stored ? "done" : "pending",
+              chunk_count: res.data.chunk_count || 0,
             },
             ...prev,
           ]);
@@ -127,6 +133,41 @@ const Dashboard = () => {
     } catch (err) {
       setError(err.response?.data?.detail || "Failed to delete file");
     }
+  };
+
+  const openChunkViewer = async (file) => {
+    setSelectedChunkFile(file);
+    setChunkViewerLoading(true);
+    setChunkViewerError(null);
+    setSemanticChunks([]);
+
+    try {
+      const res = await api.get(`/files/${file.id}`);
+      const chunks = res.data?.file?.extracted_fields?.chunks || [];
+      setSemanticChunks(Array.isArray(chunks) ? chunks : []);
+    } catch (err) {
+      setChunkViewerError(err.response?.data?.detail || "Failed to load semantic chunks");
+    } finally {
+      setChunkViewerLoading(false);
+    }
+  };
+
+  const closeChunkViewer = () => {
+    setSelectedChunkFile(null);
+    setChunkViewerError(null);
+    setChunkViewerLoading(false);
+    setSemanticChunks([]);
+  };
+
+  const formatEntityValue = (value) => {
+    if (value == null) return "";
+    if (Array.isArray(value)) return value.join(", ");
+    if (typeof value === "object") {
+      return Object.entries(value)
+        .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : String(v)}`)
+        .join(" | ");
+    }
+    return String(value);
   };
 
   const totalDocs = documents.length;
@@ -370,6 +411,14 @@ const Dashboard = () => {
                         </span>
                         <button
                           type="button"
+                          onClick={() => openChunkViewer(doc)}
+                          className="rounded-lg border border-[#c8d2d8] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#0f4d3d] transition hover:border-[#0f4d3d] hover:bg-[#f0fbf7]"
+                          title="View semantic chunks"
+                        >
+                          🧠 Chunks
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => handleDelete(doc.id, doc.filename)}
                           className="rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-semibold text-red-600 transition hover:border-red-400 hover:bg-red-50"
                           title="Delete file"
@@ -409,6 +458,115 @@ const Dashboard = () => {
         )}
       </section>
       </div>
+
+      {selectedChunkFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4">
+          <div className="max-h-[85vh] w-full max-w-4xl overflow-hidden rounded-2xl border border-[#c8d2d8] bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-[#d6dde2] bg-gradient-to-r from-[#0f4d3d] to-[#06332a] px-5 py-4 text-white">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-[#b8f2dd]">Semantic Viewer</p>
+                <h3 className="text-lg font-black">{selectedChunkFile.filename}</h3>
+              </div>
+              <button
+                type="button"
+                onClick={closeChunkViewer}
+                className="rounded-lg border border-white/30 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-white/10"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="max-h-[70vh] overflow-y-auto p-5">
+              {chunkViewerLoading ? (
+                <div className="py-10 text-center text-[#577181]">
+                  <p className="text-3xl">⏳</p>
+                  <p className="mt-2">Loading semantic chunks...</p>
+                </div>
+              ) : chunkViewerError ? (
+                <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {chunkViewerError}
+                </div>
+              ) : semanticChunks.length === 0 ? (
+                <div className="rounded-lg border border-[#d6dde2] bg-[#f7fafb] px-4 py-5 text-sm text-[#577181]">
+                  No semantic chunks found for this file yet. If upload just completed, wait a moment and reopen.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {semanticChunks.map((chunk, index) => {
+                    const entities = chunk.entities || {};
+                    return (
+                      <article
+                        key={chunk.chunk_id ?? index}
+                        className="rounded-xl border border-[#d6dde2] bg-[#fbfdff] p-4"
+                      >
+                        <div className="mb-3 flex flex-wrap items-center gap-2">
+                          <span className="rounded-full bg-[#e6f4ee] px-2.5 py-1 text-xs font-bold text-[#0f7a4f]">
+                            {chunk.category || "other"}
+                          </span>
+                          <span className="rounded-full bg-[#edf6ff] px-2.5 py-1 text-xs font-semibold text-[#2561a6]">
+                            {chunk.sub_category || "general"}
+                          </span>
+                          <span className="rounded-full bg-[#f4f4f4] px-2.5 py-1 text-xs font-semibold text-[#334e62]">
+                            Confidence: {typeof chunk.confidence === "number" ? chunk.confidence.toFixed(2) : "0.00"}
+                          </span>
+                          {chunk.needs_review && (
+                            <span className="rounded-full bg-[#fff1d6] px-2.5 py-1 text-xs font-bold text-[#925d00]">
+                              Needs Review
+                            </span>
+                          )}
+                          <span className="text-xs font-semibold text-[#577181]">
+                            Chunk #{chunk.chunk_id ?? index}
+                          </span>
+                        </div>
+
+                        {Array.isArray(chunk.mapped_fields) && chunk.mapped_fields.length > 0 && (
+                          <div className="mb-3 flex flex-wrap gap-1.5">
+                            {chunk.mapped_fields.map((fieldName) => (
+                              <span
+                                key={fieldName}
+                                className="rounded-full border border-[#d6dde2] bg-white px-2 py-1 text-[11px] font-semibold text-[#0f4d3d]"
+                              >
+                                {fieldName}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        {chunk.needs_review && chunk.review_reason && (
+                          <div className="mb-3 rounded-lg border border-[#ffd7a3] bg-[#fff9ef] px-3 py-2 text-xs text-[#7c4a00]">
+                            {chunk.review_reason}
+                          </div>
+                        )}
+
+                        <p className="rounded-lg bg-white p-3 text-sm leading-relaxed text-[#153347] border border-[#e8eef3]">
+                          {chunk.text || "No text"}
+                        </p>
+
+                        {Object.keys(entities).length > 0 && (
+                          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                            {Object.entries(entities).map(([key, value]) => {
+                              const displayValue = formatEntityValue(value);
+                              if (!displayValue) return null;
+                              return (
+                                <div key={key} className="rounded-lg border border-[#e8eef3] bg-white p-2.5">
+                                  <p className="text-[10px] font-bold uppercase tracking-wider text-[#55717f]">
+                                    {key.replaceAll("_", " ")}
+                                  </p>
+                                  <p className="mt-1 text-xs text-[#153347]">{displayValue}</p>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 };
