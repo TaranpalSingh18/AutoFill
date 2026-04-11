@@ -180,11 +180,29 @@ async def upload_file(file: UploadFile = FastAPIFile(...), token: str = Depends(
 
         semantic_stored = False
         semantic_chunk_count = 0
+        semantic_ingest_status = "pending"
+        semantic_ingest_error = None
         if extracted_text:
+            extracted_fields = {}
             try:
                 extracted_fields = parse_resume_text(extracted_text)
                 extracted_fields, llm_used, llm_note = review_needs_review_chunks(extracted_fields)
                 chunks = build_vector_chunks_from_parsed(extracted_fields)
+                semantic_chunk_count = len(chunks)
+
+                # Persist semantic chunks to Mongo first so UI can render them
+                # even if vector DB ingestion fails.
+                files_collection.update_one(
+                    {"_id": result.inserted_id},
+                    {
+                        "$set": {
+                            "extracted_fields": extracted_fields,
+                            "metadata.llm_review_used": llm_used,
+                            "metadata.llm_review_note": llm_note,
+                        }
+                    },
+                )
+
                 ingest_result = ingest_semantic_chunks(
                     file_id=str(result.inserted_id),
                     file_name=file.filename or "",
@@ -201,21 +219,36 @@ async def upload_file(file: UploadFile = FastAPIFile(...), token: str = Depends(
                             "ingest_status": "done" if semantic_stored else "pending",
                             "chunk_count": semantic_chunk_count,
                             "ingest_error": None,
-                            "metadata.llm_review_used": llm_used,
-                            "metadata.llm_review_note": llm_note,
                         }
                     },
                 )
+                semantic_ingest_status = "done" if semantic_stored else "pending"
             except Exception as ingest_error:
+                semantic_ingest_status = "failed"
+                semantic_ingest_error = str(ingest_error)
                 files_collection.update_one(
                     {"_id": result.inserted_id},
                     {
                         "$set": {
+                            "extracted_fields": extracted_fields,
                             "ingest_status": "failed",
                             "ingest_error": str(ingest_error),
+                            "chunk_count": semantic_chunk_count,
                         }
                     },
                 )
+        else:
+            semantic_ingest_status = "pending"
+            semantic_ingest_error = "No extractable text found in file"
+            files_collection.update_one(
+                {"_id": result.inserted_id},
+                {
+                    "$set": {
+                        "ingest_status": "pending",
+                        "ingest_error": semantic_ingest_error,
+                    }
+                },
+            )
         
         return {
             "success": True,
@@ -227,6 +260,8 @@ async def upload_file(file: UploadFile = FastAPIFile(...), token: str = Depends(
             "file_path": file_doc["file_path"],
             "semantic_stored": semantic_stored,
             "chunk_count": semantic_chunk_count,
+            "ingest_status": semantic_ingest_status,
+            "ingest_error": semantic_ingest_error,
         }
 
     except CloudinaryError as e:
@@ -259,7 +294,9 @@ async def list_files(token: str = Depends(oath2_schema)):
                     "upload_date": f["upload_date"].isoformat(),
                     "status": f["status"],
                     "ingest_status": f.get("ingest_status", "pending"),
-                    "chunk_count": f.get("chunk_count", 0),
+                    "chunk_count": f.get("chunk_count")
+                    if isinstance(f.get("chunk_count"), int) and f.get("chunk_count") > 0
+                    else len(((f.get("extracted_fields") or {}).get("chunks") or [])),
                     "ingest_error": f.get("ingest_error"),
                 }
                 for f in files
@@ -348,7 +385,9 @@ async def get_file_details(file_id: str, token: str = Depends(oath2_schema)):
                 "status": file_doc["status"],
                 "extracted_fields": file_doc.get("extracted_fields", {}),
                 "ingest_status": file_doc.get("ingest_status", "pending"),
-                "chunk_count": file_doc.get("chunk_count", 0),
+                "chunk_count": file_doc.get("chunk_count")
+                if isinstance(file_doc.get("chunk_count"), int) and file_doc.get("chunk_count") > 0
+                else len(((file_doc.get("extracted_fields") or {}).get("chunks") or [])),
                 "ingest_error": file_doc.get("ingest_error"),
                 "llm_review_used": (file_doc.get("metadata") or {}).get("llm_review_used", False),
                 "llm_review_note": (file_doc.get("metadata") or {}).get("llm_review_note"),

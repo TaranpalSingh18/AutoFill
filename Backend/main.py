@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from router.auth.main import auth_router
 from router.features.upload.main import upload_router
 from router.features.retrieval.vector_db import retrieval_router
+from Scraper.router import scraper_router
 from db.database import ping_mongo, close_mongo
 
 app = FastAPI()
@@ -19,6 +20,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(upload_router)
 app.include_router(retrieval_router)
+app.include_router(scraper_router)
 
 
 @app.on_event("startup")

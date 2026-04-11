@@ -1,4 +1,5 @@
 import os
+from urllib.parse import urlparse
 from dotenv import load_dotenv
 import weaviate
 from weaviate.auth import AuthApiKey
@@ -31,8 +32,8 @@ def get_client():
     if _client is not None:
         return _client
 
-    weaviate_api_key = os.getenv("WEAVIATE_API_KEY")
-    weaviate_url = os.getenv("WEAVIATE_URL")
+    weaviate_api_key = (os.getenv("WEAVIATE_API_KEY") or "").strip().strip('"').strip("'")
+    weaviate_url = (os.getenv("WEAVIATE_URL") or "").strip().strip('"').strip("'")
 
     if not weaviate_api_key:
         raise RuntimeError("WEAVIATE_API_KEY not found")
@@ -43,6 +44,7 @@ def get_client():
     if not weaviate_url.startswith("http"):
         weaviate_url = f"https://{weaviate_url}"
 
+    cloud_error = None
     try:
         _client = weaviate.connect_to_weaviate_cloud(
             cluster_url=weaviate_url,
@@ -50,9 +52,34 @@ def get_client():
             skip_init_checks=True,
         )
     except Exception as e:
-        raise RuntimeError(
-            "Failed to connect to Weaviate. Check WEAVIATE_URL format and ensure your cluster has gRPC enabled/reachable."
-        ) from e
+        cloud_error = e
+
+    if _client is None:
+        parsed = urlparse(weaviate_url)
+        http_host = parsed.hostname or ""
+        http_secure = parsed.scheme == "https"
+        http_port = parsed.port or (443 if http_secure else 80)
+
+        grpc_host = (os.getenv("WEAVIATE_GRPC_HOST") or "").strip().strip('"').strip("'") or http_host
+        grpc_port_raw = (os.getenv("WEAVIATE_GRPC_PORT") or "").strip().strip('"').strip("'")
+        grpc_port = int(grpc_port_raw) if grpc_port_raw.isdigit() else (443 if http_secure else 50051)
+
+        try:
+            _client = weaviate.connect_to_custom(
+                http_host=http_host,
+                http_port=http_port,
+                http_secure=http_secure,
+                grpc_host=grpc_host,
+                grpc_port=grpc_port,
+                grpc_secure=http_secure,
+                auth_credentials=AuthApiKey(weaviate_api_key),
+                skip_init_checks=True,
+            )
+        except Exception as custom_error:
+            raise RuntimeError(
+                "Failed to connect to Weaviate. Verify WEAVIATE_URL/WEAVIATE_API_KEY and gRPC reachability "
+                f"(grpc host: {grpc_host}, port: {grpc_port}). Cloud error: {cloud_error}; Custom error: {custom_error}"
+            ) from custom_error
 
     ensure_collection(_client)
     return _client

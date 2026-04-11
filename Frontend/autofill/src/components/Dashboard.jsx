@@ -108,8 +108,9 @@ const Dashboard = () => {
               file_size: res.data.file_size,
               upload_date: res.data.upload_date,
               status: "uploaded",
-              ingest_status: res.data.semantic_stored ? "done" : "pending",
+              ingest_status: res.data.ingest_status || (res.data.semantic_stored ? "done" : "pending"),
               chunk_count: res.data.chunk_count || 0,
+              ingest_error: res.data.ingest_error || null,
             },
             ...prev,
           ]);
@@ -143,7 +144,17 @@ const Dashboard = () => {
 
     try {
       const res = await api.get(`/files/${file.id}`);
-      const chunks = res.data?.file?.extracted_fields?.chunks || [];
+      const fileData = res.data?.file || {};
+      const chunks = fileData?.extracted_fields?.chunks || [];
+
+      if (!Array.isArray(chunks) || chunks.length === 0) {
+        if (fileData.ingest_status === "failed") {
+          setChunkViewerError(fileData.ingest_error || "Semantic chunking failed for this file.");
+        } else if (fileData.ingest_error) {
+          setChunkViewerError(fileData.ingest_error);
+        }
+      }
+
       setSemanticChunks(Array.isArray(chunks) ? chunks : []);
     } catch (err) {
       setChunkViewerError(err.response?.data?.detail || "Failed to load semantic chunks");
@@ -401,6 +412,8 @@ const Dashboard = () => {
                             <span>{formatFileSize(doc.file_size)}</span>
                             <span>•</span>
                             <span>{new Date(doc.upload_date).toLocaleDateString()}</span>
+                            <span>•</span>
+                            <span className="font-semibold">Chunks: {doc.chunk_count || 0}</span>
                           </div>
                         </div>
                       </div>
@@ -408,6 +421,18 @@ const Dashboard = () => {
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <span className="rounded-full bg-[#daf5e9] px-2 py-1 text-xs font-bold text-[#0f7a4f]">
                           {doc.status}
+                        </span>
+                        <span
+                          className={`rounded-full px-2 py-1 text-xs font-bold ${
+                            doc.ingest_status === "done"
+                              ? "bg-[#daf5e9] text-[#0f7a4f]"
+                              : doc.ingest_status === "failed"
+                                ? "bg-red-100 text-red-700"
+                                : "bg-[#edf6ff] text-[#2561a6]"
+                          }`}
+                          title={doc.ingest_error || "Semantic chunking status"}
+                        >
+                          {doc.ingest_status || "pending"}
                         </span>
                         <button
                           type="button"
